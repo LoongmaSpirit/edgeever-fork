@@ -27,11 +27,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { api } from "@/lib/api";
+import { compressImageForUpload } from "@/lib/image-compression";
 import { localDb } from "@/lib/local-db";
 import { buildNotebookTree, cn, formatDateTime, parseTagsText, type NotebookNode } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 type Pane = "notebooks" | "memos" | "editor";
+
+const IMAGE_COMPRESSION_STORAGE_KEY = "edgeever.imageCompressionEnabled";
 
 export const App = () => {
   const queryClient = useQueryClient();
@@ -117,6 +120,7 @@ const WorkspaceApp = ({
   const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
   const [selectedMemoIds, setSelectedMemoIds] = useState<Set<string>>(new Set());
   const [multiSelectKeyDown, setMultiSelectKeyDown] = useState(false);
+  const [imageCompressionEnabled, setImageCompressionEnabled] = useState(readImageCompressionPreference);
   const [search, setSearch] = useState("");
 
   const notebooksQuery = useQuery({
@@ -155,6 +159,10 @@ const WorkspaceApp = ({
       window.removeEventListener("blur", handleBlur);
     };
   }, []);
+
+  useEffect(() => {
+    writeImageCompressionPreference(imageCompressionEnabled);
+  }, [imageCompressionEnabled]);
 
   const memosQuery = useQuery({
     queryKey: ["memos", selectedNotebookId, search],
@@ -280,6 +288,8 @@ const WorkspaceApp = ({
             onBackToList={() => setActivePane("memos")}
             onLogout={onLogout}
             isLoggingOut={isLoggingOut}
+            imageCompressionEnabled={imageCompressionEnabled}
+            onImageCompressionChange={setImageCompressionEnabled}
           />
         </aside>
 
@@ -318,6 +328,7 @@ const WorkspaceApp = ({
             memo={selectedMemo}
             notebooks={notebooks}
             isLoading={memoQuery.isLoading}
+            imageCompressionEnabled={imageCompressionEnabled}
             onBackToList={() => setActivePane("memos")}
             onSaved={async (memo) => {
               queryClient.setQueryData(["memo", memo.id], { memo });
@@ -341,6 +352,22 @@ const AuthLoadingScreen = () => (
     EdgeEver
   </div>
 );
+
+const readImageCompressionPreference = () => {
+  try {
+    return window.localStorage.getItem(IMAGE_COMPRESSION_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+};
+
+const writeImageCompressionPreference = (enabled: boolean) => {
+  try {
+    window.localStorage.setItem(IMAGE_COMPRESSION_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Local storage can be unavailable in private or restricted browser contexts.
+  }
+};
 
 const LoginScreen = ({
   error,
@@ -436,6 +463,8 @@ const NotebookPane = ({
   onBackToList,
   onLogout,
   isLoggingOut,
+  imageCompressionEnabled,
+  onImageCompressionChange,
 }: {
   authRequired: boolean;
   user: AuthUser | null;
@@ -447,6 +476,8 @@ const NotebookPane = ({
   onBackToList: () => void;
   onLogout: () => void;
   isLoggingOut: boolean;
+  imageCompressionEnabled: boolean;
+  onImageCompressionChange: (enabled: boolean) => void;
 }) => {
   const tree = useMemo(() => buildNotebookTree(notebooks), [notebooks]);
 
@@ -493,6 +524,16 @@ const NotebookPane = ({
       </div>
 
       <footer className="border-t border-emerald-100 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+        <label className="mb-3 flex min-h-10 items-center justify-between gap-3 rounded-md border border-emerald-100 bg-emerald-50/70 px-3 py-2">
+          <span className="min-w-0 text-sm font-medium text-slate-700">压缩图片</span>
+          <input
+            type="checkbox"
+            checked={imageCompressionEnabled}
+            onChange={(event) => onImageCompressionChange(event.target.checked)}
+            className="h-4 w-4 shrink-0 rounded border-emerald-300 text-emerald-600"
+            aria-label="粘贴图片时自动压缩"
+          />
+        </label>
         <div className={cn("grid gap-2", authRequired ? "grid-cols-4" : "grid-cols-3")}>
           <Button size="icon" variant="ghost" title="标签">
             <Tags className="h-4 w-4" />
@@ -824,6 +865,7 @@ const EditorPane = ({
   memo,
   notebooks,
   isLoading,
+  imageCompressionEnabled,
   onBackToList,
   onSaved,
   onDeleted,
@@ -831,6 +873,7 @@ const EditorPane = ({
   memo: MemoDetail | null;
   notebooks: Notebook[];
   isLoading: boolean;
+  imageCompressionEnabled: boolean;
   onBackToList: () => void;
   onSaved: (memo: MemoDetail) => Promise<void>;
   onDeleted: (memoId: string) => Promise<void>;
@@ -838,9 +881,10 @@ const EditorPane = ({
   const [title, setTitle] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [imageUploadState, setImageUploadState] = useState<"idle" | "uploading" | "error">("idle");
+  const [imageUploadState, setImageUploadState] = useState<"idle" | "compressing" | "uploading" | "error">("idle");
   const memoRef = useRef<MemoDetail | null>(memo);
   const editorRef = useRef<Editor | null>(null);
+  const imageCompressionEnabledRef = useRef(imageCompressionEnabled);
   const insertImageFiles = useCallback((files: File[]) => {
     const currentMemo = memoRef.current;
     const currentEditor = editorRef.current;
@@ -856,7 +900,12 @@ const EditorPane = ({
 
       try {
         for (const file of files) {
-          const { resource } = await api.uploadMemoResource(targetMemoId, file);
+          const shouldCompress = imageCompressionEnabledRef.current;
+          setImageUploadState(shouldCompress ? "compressing" : "uploading");
+          const uploadFile = shouldCompress ? (await compressImageForUpload(file)).file : file;
+
+          setImageUploadState("uploading");
+          const { resource } = await api.uploadMemoResource(targetMemoId, uploadFile);
 
           if (memoRef.current?.id !== targetMemoId || !editorRef.current) {
             setImageUploadState("idle");
@@ -868,8 +917,8 @@ const EditorPane = ({
             .focus()
             .setImage({
               src: resource.url,
-              alt: resource.filename ?? file.name,
-              title: resource.filename ?? file.name,
+              alt: file.name,
+              title: file.name,
             })
             .run();
         }
@@ -925,6 +974,10 @@ const EditorPane = ({
   useEffect(() => {
     memoRef.current = memo;
   }, [memo]);
+
+  useEffect(() => {
+    imageCompressionEnabledRef.current = imageCompressionEnabled;
+  }, [imageCompressionEnabled]);
 
   useEffect(() => {
     editorRef.current = editor;
@@ -1049,7 +1102,11 @@ const EditorPane = ({
                     : "bg-emerald-50 text-emerald-700"
                 )}
               >
-                {imageUploadState === "error" ? "图片上传失败" : "图片上传中"}
+                {imageUploadState === "error"
+                  ? "图片上传失败"
+                  : imageUploadState === "compressing"
+                    ? "图片压缩中"
+                    : "图片上传中"}
               </span>
             ) : null}
             <Button size="sm" variant="ghost" title="删除笔记" onClick={() => void onDeleted(memo.id)}>
