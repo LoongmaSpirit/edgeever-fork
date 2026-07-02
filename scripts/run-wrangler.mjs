@@ -123,6 +123,7 @@ const runtimeVars = {
   EDGE_EVER_AUTH_USERNAME: envValue("AUTH_USERNAME"),
   EDGE_EVER_SESSION_TTL_DAYS: envValue("SESSION_TTL_DAYS"),
   EDGE_EVER_R2_BUCKET_NAME: envValue("R2_BUCKET_NAME"),
+  EDGE_EVER_DEMO_MODE: envValue("DEMO_MODE"),
 };
 const runtimeVarLines = Object.entries(runtimeVars)
   .filter(([, value]) => Boolean(value))
@@ -134,6 +135,21 @@ if (runtimeVarLines.length > 0) {
 
 [vars]
 ${runtimeVarLines.join("\n")}
+`;
+}
+
+const demoMode = envValue("DEMO_MODE")?.toLowerCase();
+if (demoMode && !["true", "false"].includes(demoMode)) {
+  throw new Error("EDGE_EVER_DEMO_MODE must be true or false.");
+}
+
+if (demoMode === "true") {
+  const demoResetCron = envValue("DEMO_RESET_CRON") || "0 19 * * *";
+  changed = true;
+  config = `${config.trimEnd()}
+
+[triggers]
+crons = [${tomlString(demoResetCron)}]
 `;
 }
 

@@ -43,6 +43,7 @@ type Bindings = {
   EDGE_EVER_AUTH_PASSWORD_HASH?: string;
   EDGE_EVER_SESSION_TTL_DAYS?: string;
   EDGE_EVER_R2_BUCKET_NAME?: string;
+  EDGE_EVER_DEMO_MODE?: string;
 };
 
 type AuthContext = {
@@ -194,6 +195,72 @@ const PASSWORD_SALT_BYTES = 16;
 const SESSION_TOKEN_BYTES = 32;
 const DEFAULT_SESSION_TTL_DAYS = 30;
 const DEFAULT_R2_BUCKET_NAME = "edgeever-resources";
+const DEMO_SEED_NOTEBOOKS = [
+  { id: "nb_inbox", parentId: null, name: "等待分类", slug: "inbox", icon: "notebook", color: "#0f766e", sortOrder: 10 },
+  { id: "nb_projects", parentId: null, name: "工作项目", slug: "work-projects", icon: "notebook", color: "#2563eb", sortOrder: 20 },
+  { id: "nb_learning", parentId: null, name: "学习资料", slug: "learning-resources", icon: "notebook", color: "#7c3aed", sortOrder: 30 },
+  { id: "nb_creative", parentId: null, name: "灵感创作", slug: "creative-ideas", icon: "notebook", color: "#db2777", sortOrder: 40 },
+  { id: "nb_personal", parentId: null, name: "生活个人", slug: "personal-life", icon: "notebook", color: "#ea580c", sortOrder: 50 },
+  { id: "nb_demo_features", parentId: "nb_projects", name: "功能演示", slug: "demo-features", icon: "notebook", color: "#0891b2", sortOrder: 21 },
+];
+const DEMO_SEED_MEMOS = [
+  {
+    id: "memo_welcome",
+    notebookId: "nb_inbox",
+    title: "欢迎来到 EdgeEver",
+    tags: ["edgeever", "welcome"],
+    isPinned: true,
+    markdown:
+      "## 欢迎来到 EdgeEver\n\n这是公开演示环境，可以随便创建、编辑、搜索和合并笔记。\n\n演示环境会每天自动重置，请不要保存私密内容。",
+  },
+  {
+    id: "memo_demo_editor",
+    notebookId: "nb_demo_features",
+    title: "富文本与 Markdown 编辑",
+    tags: ["editor", "markdown"],
+    isPinned: true,
+    markdown:
+      "## 富文本与 Markdown 编辑\n\nEdgeEver 使用 TipTap 保存结构化正文，同时保留 Markdown 和纯文本索引。\n\n- 支持标题、列表、引用和代码块\n- API 和 MCP 可以直接读写 Markdown\n- 搜索使用纯文本索引，不依赖前端编辑器",
+  },
+  {
+    id: "memo_demo_search_tags",
+    notebookId: "nb_learning",
+    title: "标签、搜索与归档",
+    tags: ["search", "tags", "workflow"],
+    isPinned: false,
+    markdown:
+      "## 标签、搜索与归档\n\n这条笔记用于演示标签和全文搜索。你可以搜索 `workflow`、`全文搜索` 或 `EdgeEver`。\n\n建议把临时资料先放入等待分类，再通过标签和笔记本整理。",
+  },
+  {
+    id: "memo_demo_merge",
+    notebookId: "nb_demo_features",
+    title: "多选合并笔记示例",
+    tags: ["merge", "long-term-note"],
+    isPinned: false,
+    markdown:
+      "## 多选合并笔记示例\n\n在笔记列表中多选几条笔记后，可以合并为一条长期笔记。原笔记会进入回收站，资源关联会移动到新笔记。\n\n这个能力适合把零散摘录整理成项目总结。",
+  },
+  {
+    id: "memo_demo_agent",
+    notebookId: "nb_projects",
+    title: "Agent-ready：REST API 与 MCP",
+    tags: ["api", "mcp", "agent"],
+    isPinned: false,
+    markdown:
+      "## Agent-ready\n\nEdgeEver 提供 REST API、OpenAPI schema 和 MCP endpoint。AI Agent 可以读取笔记本、创建笔记、整理标签，并把导入资料迁移到你的自托管实例。\n\nOpenAPI 路径：`/api/openapi.json`",
+  },
+  {
+    id: "memo_demo_mobile",
+    notebookId: "nb_personal",
+    title: "移动端与 PWA",
+    tags: ["pwa", "mobile"],
+    isPinned: false,
+    markdown:
+      "## 移动端与 PWA\n\nEdgeEver 支持桌面三栏工作流，也适配移动端。你可以把站点安装为 PWA，用手机快速记录，再回到桌面整理。",
+  },
+];
+const DEMO_SEED_NOTEBOOK_IDS = DEMO_SEED_NOTEBOOKS.map((notebook) => notebook.id);
+const DEMO_SEED_MEMO_IDS = DEMO_SEED_MEMOS.map((memo) => memo.id);
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_UPLOAD_BYTES = 100 * 1024 * 1024;
 const REVISION_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
@@ -439,6 +506,10 @@ app.get("/api/v1/notebooks", async (c) => {
 
   if (denied) {
     return denied;
+  }
+
+  if (isDemoMode(c.env)) {
+    await ensureDemoSeed(c.env.DB);
   }
 
   const rows = await c.env.DB.prepare(
@@ -1452,6 +1523,19 @@ app.post("/mcp", async (c) => {
   return c.json(result.body, result.status as 200);
 });
 
+const worker = {
+  fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
+    return app.fetch(request, env, ctx);
+  },
+  async scheduled(controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+    if (!isDemoMode(env)) {
+      return;
+    }
+
+    ctx.waitUntil(resetDemoData(env, controller.scheduledTime));
+  },
+};
+
 app.notFound((c) =>
   c.json(
     {
@@ -1464,7 +1548,7 @@ app.notFound((c) =>
   )
 );
 
-export default app;
+export default worker;
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -3057,6 +3141,135 @@ const emptyTrashMemosRecord = async (
   ]);
 
   return deleted;
+};
+
+const isDemoMode = (env: Bindings) => env.EDGE_EVER_DEMO_MODE?.trim().toLowerCase() === "true";
+
+const ensureDemoSeed = async (db: D1Database) => {
+  const now = isoNow();
+  const statements: D1PreparedStatement[] = [];
+
+  for (const notebook of DEMO_SEED_NOTEBOOKS) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO notebooks (
+            id, parent_id, name, slug, icon, color, sort_order, is_deleted, created_at, updated_at, deleted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
+          ON CONFLICT(id) DO UPDATE SET
+            parent_id = excluded.parent_id,
+            name = excluded.name,
+            slug = excluded.slug,
+            icon = excluded.icon,
+            color = excluded.color,
+            sort_order = excluded.sort_order,
+            is_deleted = 0,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL`
+        )
+        .bind(
+          notebook.id,
+          notebook.parentId,
+          notebook.name,
+          notebook.slug,
+          notebook.icon,
+          notebook.color,
+          notebook.sortOrder,
+          now,
+          now
+        )
+    );
+  }
+
+  for (const memo of DEMO_SEED_MEMOS) {
+    const contentJson = markdownToDoc(memo.markdown);
+    const contentText = docToText(contentJson);
+    const contentHash = await sha256(memo.markdown + JSON.stringify(contentJson));
+
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO memos (
+            id, notebook_id, title, excerpt, tags_json, is_pinned, is_archived, is_deleted,
+            created_by, updated_by, created_at, updated_at, deleted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'system', 'system', ?, ?, NULL)
+          ON CONFLICT(id) DO UPDATE SET
+            notebook_id = excluded.notebook_id,
+            title = excluded.title,
+            excerpt = excluded.excerpt,
+            tags_json = excluded.tags_json,
+            is_pinned = excluded.is_pinned,
+            is_archived = 0,
+            is_deleted = 0,
+            updated_by = 'system',
+            updated_at = excluded.updated_at,
+            deleted_at = NULL`
+        )
+        .bind(
+          memo.id,
+          memo.notebookId,
+          memo.title,
+          createExcerpt(contentText),
+          JSON.stringify(normalizeTags(memo.tags)),
+          memo.isPinned ? 1 : 0,
+          now,
+          now
+        ),
+      db
+        .prepare(
+          `INSERT INTO memo_contents (
+            memo_id, content_json, content_markdown, content_text, content_hash, revision, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+          ON CONFLICT(memo_id) DO UPDATE SET
+            content_json = excluded.content_json,
+            content_markdown = excluded.content_markdown,
+            content_text = excluded.content_text,
+            content_hash = excluded.content_hash,
+            revision = 0,
+            updated_at = excluded.updated_at`
+        )
+        .bind(memo.id, JSON.stringify(contentJson), memo.markdown, contentText, contentHash, now, now),
+      db.prepare(`DELETE FROM memos_fts WHERE memo_id = ?`).bind(memo.id),
+      db
+        .prepare(
+          `INSERT INTO memos_fts (memo_id, title, content_text, tags)
+           VALUES (?, ?, ?, ?)`
+        )
+        .bind(memo.id, memo.title, contentText, memo.tags.join(" "))
+    );
+  }
+
+  await db.batch(statements);
+};
+
+const resetDemoData = async (env: Bindings, scheduledTime: number) => {
+  const db = env.DB;
+  const memoPlaceholders = DEMO_SEED_MEMO_IDS.map(() => "?").join(", ");
+  const notebookPlaceholders = DEMO_SEED_NOTEBOOK_IDS.map(() => "?").join(", ");
+  const resourceRows = await db.prepare(`SELECT object_key FROM resources`).all<{ object_key: string }>();
+  const objectKeys = resourceRows.results.map((resource) => resource.object_key);
+
+  for (let index = 0; index < objectKeys.length; index += 1000) {
+    await env.RESOURCES.delete(objectKeys.slice(index, index + 1000));
+  }
+
+  await db.batch([
+    db.prepare(`DELETE FROM memos_fts`),
+    db.prepare(`DELETE FROM resources`),
+    db.prepare(`DELETE FROM memo_revisions`),
+    db.prepare(`DELETE FROM memo_contents WHERE memo_id NOT IN (${memoPlaceholders})`).bind(...DEMO_SEED_MEMO_IDS),
+    db.prepare(`DELETE FROM memos WHERE id NOT IN (${memoPlaceholders})`).bind(...DEMO_SEED_MEMO_IDS),
+    db.prepare(`UPDATE notebooks SET parent_id = NULL`),
+    db.prepare(`DELETE FROM notebooks WHERE id NOT IN (${notebookPlaceholders})`).bind(...DEMO_SEED_NOTEBOOK_IDS),
+    db.prepare(`DELETE FROM api_tokens`),
+    db.prepare(`DELETE FROM audit_events`),
+  ]);
+
+  await ensureDemoSeed(db);
+  await audit(db, "system", null, "demo.reset", "demo", "edgeever-demo", {
+    scheduledTime: new Date(scheduledTime).toISOString(),
+    seedMemoCount: DEMO_SEED_MEMOS.length,
+  });
 };
 
 const moveMemosToNotebook = async (

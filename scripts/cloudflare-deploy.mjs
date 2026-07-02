@@ -65,7 +65,7 @@ const readEnv = () => {
 };
 
 const scopedKey = (name, values) => {
-  const instance = (values.get("EDGE_EVER_INSTANCE") || process.env.EDGE_EVER_INSTANCE || "")
+  const instance = (process.env.EDGE_EVER_INSTANCE || values.get("EDGE_EVER_INSTANCE") || "")
     .trim()
     .replace(/[^a-zA-Z0-9]/g, "_")
     .toUpperCase();
@@ -248,6 +248,14 @@ const doctor = () => {
   passed =
     check("R2 bucket name", Boolean(envValue("R2_BUCKET_NAME", values)), envValue("R2_BUCKET_NAME", values) || "missing") &&
     passed;
+
+  const demoMode = envValue("DEMO_MODE", values).toLowerCase();
+  passed =
+    check(
+      "demo mode",
+      !demoMode || ["true", "false"].includes(demoMode),
+      demoMode === "true" ? "enabled, daily reset cron will be generated" : "disabled",
+    ) && passed;
 
   const passwordHash = envValue("AUTH_PASSWORD_HASH", values);
   passed =

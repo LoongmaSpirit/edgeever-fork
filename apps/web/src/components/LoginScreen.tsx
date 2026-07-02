@@ -10,9 +10,21 @@ interface LoginScreenProps {
   onSubmit: (payload: { username: string; password: string }) => void;
 }
 
+const DEMO_LOGIN_CREDENTIALS = {
+  username: "ee-demo",
+  password: "demo#dZ6Q29Zjfor%",
+};
+
+const getDefaultLoginCredentials = () => {
+  const hostname = window.location.hostname;
+  const isDemoHost = hostname === "demo.edgeever.org" || hostname.startsWith("edgeever-demo.");
+
+  return isDemoHost ? DEMO_LOGIN_CREDENTIALS : { username: "admin", password: "" };
+};
+
 export const LoginScreen = ({ error, isSubmitting, onSubmit }: LoginScreenProps) => {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState(() => getDefaultLoginCredentials().username);
+  const [password, setPassword] = useState(() => getDefaultLoginCredentials().password);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
