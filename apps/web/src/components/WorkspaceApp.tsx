@@ -28,7 +28,7 @@ import { MemoListPane, MemoSelectionActionBar } from "./MemoListPane";
 import { AppConfirmDialog, MemoDeleteConfirmDialog, NotebookNameDialog } from "./dialogs/ConfirmDialogs";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { emptyDoc, markdownToDoc, type Notebook, type AuthUser, type MemoSummary, type MemoDetail } from "@edgeever/shared";
+import { createExcerpt, docToText, emptyDoc, markdownToDoc, type Notebook, type AuthUser, type MemoSummary, type MemoDetail } from "@edgeever/shared";
 import type {
   Pane,
   MemoView,
@@ -138,7 +138,7 @@ const memoToSummary = (memo: MemoDetail): MemoSummary => ({
   id: memo.id,
   notebookId: memo.notebookId,
   title: memo.title,
-  excerpt: memo.excerpt,
+  excerpt: memo.excerpt || createExcerpt(memo.contentText || docToText(memo.contentJson) || memo.contentMarkdown),
   tags: memo.tags,
   isPinned: memo.isPinned,
   isArchived: memo.isArchived,
@@ -153,12 +153,72 @@ const cacheMemoDetail = (queryClient: QueryClient, memo: MemoDetail, view: MemoV
   queryClient.setQueryData(memoDetailQueryKey(memo.id, view), { memo });
 };
 
+const memoMatchesFilter = (memo: MemoSummary, filterMode: unknown) => {
+  if (filterMode === "tagged") {
+    return memo.tags.length > 0;
+  }
+
+  if (filterMode === "untagged") {
+    return memo.tags.length === 0;
+  }
+
+  if (filterMode === "pinned") {
+    return memo.isPinned;
+  }
+
+  return true;
+};
+
+const memoBelongsInList = (memo: MemoSummary, queryKey: readonly unknown[]) => {
+  const [, view, notebookId, search, filterMode] = queryKey;
+  const memoView = view === "trash" ? "trash" : "notebook";
+
+  if (memoView === "trash" !== memo.isDeleted) {
+    return false;
+  }
+
+  if (memoView === "notebook" && typeof notebookId === "string" && notebookId && memo.notebookId !== notebookId) {
+    return false;
+  }
+
+  if (typeof search === "string" && search.trim()) {
+    return false;
+  }
+
+  return memoMatchesFilter(memo, filterMode);
+};
+
+const sortMemoSummariesForList = (memos: MemoSummary[], queryKey: readonly unknown[]) => {
+  const sortMode = queryKey[5];
+  const sorted = [...memos];
+
+  if (sortMode === "title-asc") {
+    return sorted.sort((left, right) => {
+      const leftTitle = left.title?.trim() || left.excerpt || DEFAULT_MEMO_TITLE;
+      const rightTitle = right.title?.trim() || right.excerpt || DEFAULT_MEMO_TITLE;
+      return leftTitle.localeCompare(rightTitle, "zh-CN") || left.id.localeCompare(right.id);
+    });
+  }
+
+  if (sortMode === "created-desc") {
+    return sorted.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id));
+  }
+
+  return sorted.sort((left, right) => {
+    if (left.isPinned !== right.isPinned) {
+      return left.isPinned ? -1 : 1;
+    }
+
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || right.id.localeCompare(left.id);
+  });
+};
+
 const updateMemoSummaryInLists = (queryClient: QueryClient, memo: MemoDetail) => {
   const summary = memoToSummary(memo);
 
-  queryClient.setQueriesData<MemoListQueryData>({ queryKey: ["memos"] }, (current) => {
+  for (const [queryKey, current] of queryClient.getQueriesData<MemoListQueryData>({ queryKey: ["memos"] })) {
     if (!current) {
-      return current;
+      continue;
     }
 
     let changed = false;
@@ -177,8 +237,24 @@ const updateMemoSummaryInLists = (queryClient: QueryClient, memo: MemoDetail) =>
       return pageChanged ? { ...page, memos } : page;
     });
 
-    return changed ? { ...current, pages } : current;
-  });
+    if (!changed && memoBelongsInList(summary, queryKey)) {
+      const [firstPage, ...restPages] = pages;
+      const nextFirstPage = firstPage
+        ? {
+            ...firstPage,
+            memos: sortMemoSummariesForList([summary, ...firstPage.memos], queryKey),
+            totalCount: firstPage.totalCount + 1,
+          }
+        : { memos: [summary], totalCount: 1, nextCursor: null };
+
+      queryClient.setQueryData(queryKey, { ...current, pages: [nextFirstPage, ...restPages] });
+      continue;
+    }
+
+    if (changed) {
+      queryClient.setQueryData(queryKey, { ...current, pages });
+    }
+  }
 };
 
 const createPendingMemoDetail = (notebookId: string, template?: MemoTemplate): MemoDetail => {
