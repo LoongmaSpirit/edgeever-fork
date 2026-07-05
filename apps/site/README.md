@@ -4,7 +4,7 @@
 
 > **EdgeEver：基于 Cloudflare 全家桶自托管的开源『印象笔记』。**
 >
-> 核心项目仓库：[GitHub - msh01/edgeever](https://github.com/msh01/edgeever)
+> 核心项目仓库：[GitHub - tianma-if/edgeever](https://github.com/tianma-if/edgeever)
 > 
 > 官方网站地址：[https://edgeever.org](https://edgeever.org) (演示环境：[https://demo.edgeever.org](https://demo.edgeever.org))
 

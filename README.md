@@ -29,7 +29,7 @@ Fork this repository to your own GitHub account first, then deploy from your for
 Copy this prompt into your AI coding assistant, such as Claude Code, Codex, Antigravity, Cursor, or Trae:
 
 ```text
-Please fork the EdgeEver repository first: https://github.com/msh01/edgeever
+Please fork the EdgeEver repository first: https://github.com/tianma-if/edgeever
 
 After the fork is ready, use the forked repository to install and deploy EdgeEver to Cloudflare, and configure automatic upstream sync for the fork so future product updates can be pulled in.
 ```
@@ -41,7 +41,7 @@ Agents should follow [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudfla
 1. Fork the official repository:
 
    ```text
-   https://github.com/msh01/edgeever
+   https://github.com/tianma-if/edgeever
    ```
 
 2. Clone your fork:
@@ -191,5 +191,5 @@ EdgeEver avoids Worker-side image processing to reduce compute and image-process
 
 ## Community and Feedback
 
-- Bugs, feature requests, and deployment issues: [GitHub Issues](https://github.com/msh01/edgeever/issues)
+- Bugs, feature requests, and deployment issues: [GitHub Issues](https://github.com/tianma-if/edgeever/issues)
 - WeChat: `m1245207870` (please mention EdgeEver)

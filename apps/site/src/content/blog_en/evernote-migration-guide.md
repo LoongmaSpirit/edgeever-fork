@@ -38,7 +38,7 @@ After the assistant has configured MCP, copy the prompt below and send it to the
 You are my AI coding assistant. Please migrate my local Evernote data into my currently deployed EdgeEver instance:
 1. Check for and install the backup tool with `pipx install evernote-backup`.
 2. Ask me for my Evernote username and password, initialize the database with the China backend if needed, sync the data, and export it to `./evernote-export`.
-3. Download the latest migration script from GitHub: `https://raw.githubusercontent.com/msh01/edgeever/main/scripts/import-evernote-enex-via-mcp.mjs`.
+3. Download the latest migration script from GitHub: `https://raw.githubusercontent.com/tianma-if/edgeever/main/scripts/import-evernote-enex-via-mcp.mjs`.
 4. Install the local image compression and XML parsing dependencies required by the script: `sharp` and `fast-xml-parser`.
 5. Use the previously configured URL and token to run the script and complete the migration. The script will automatically convert images to WebP:
    - Full migration: `bun import-evernote-enex-via-mcp.mjs --input "./evernote-export" --yes`
@@ -47,7 +47,7 @@ You are my AI coding assistant. Please migrate my local Evernote data into my cu
 Tell me what information you need, such as account credentials, and then run the steps concurrently where possible.
 ```
 
-> Manual fallback: if you do not use an AI assistant, open the [EdgeEver GitHub repository](https://github.com/msh01/edgeever), download `scripts/import-evernote-enex-via-mcp.mjs`, and follow the instructions in the script header.
+> Manual fallback: if you do not use an AI assistant, open the [EdgeEver GitHub repository](https://github.com/tianma-if/edgeever), download `scripts/import-evernote-enex-via-mcp.mjs`, and follow the instructions in the script header.
 
 ---
 

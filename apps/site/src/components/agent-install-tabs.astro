@@ -28,8 +28,8 @@ const copy = isEnglish
       manualCloudflare: "Create Cloudflare resources manually",
       manualHint: "Put the database_id returned by the D1 command and your password hash into your local .env.local file.",
       promptText:
-        "Please fork the EdgeEver repository first: https://github.com/msh01/edgeever\n\nAfter the fork is ready, use the forked repository to install and deploy EdgeEver to Cloudflare, and configure automatic upstream sync for the fork so future product updates can be pulled in.",
-      forkUrl: "https://github.com/msh01/edgeever",
+        "Please fork the EdgeEver repository first: https://github.com/tianma-if/edgeever\n\nAfter the fork is ready, use the forked repository to install and deploy EdgeEver to Cloudflare, and configure automatic upstream sync for the fork so future product updates can be pulled in.",
+      forkUrl: "https://github.com/tianma-if/edgeever",
       cloneCommand: "git clone <your fork repository URL>\ncd edgeever",
       deployCommand:
         "cp .env.local.example .env.local\nbun install\nEDGE_EVER_PASSWORD='<your password>' bun run deploy:setup\nbun run deploy:doctor\nbun run deploy",
@@ -57,8 +57,8 @@ const copy = isEnglish
       manualCloudflare: "手动创建 Cloudflare 资源",
       manualHint: "把 D1 创建命令返回的 database_id 和密码 hash 填入本机 .env.local。",
       promptText:
-        "请先 Fork EdgeEver 仓库：https://github.com/msh01/edgeever\n\nFork 完成后，请使用 Fork 后的仓库把 EdgeEver 安装部署到 Cloudflare 上，并为 Fork 仓库配置自动同步上游，以便后续获取最新产品特性。",
-      forkUrl: "https://github.com/msh01/edgeever",
+        "请先 Fork EdgeEver 仓库：https://github.com/tianma-if/edgeever\n\nFork 完成后，请使用 Fork 后的仓库把 EdgeEver 安装部署到 Cloudflare 上，并为 Fork 仓库配置自动同步上游，以便后续获取最新产品特性。",
+      forkUrl: "https://github.com/tianma-if/edgeever",
       cloneCommand: "git clone <你的 Fork 仓库 URL>\ncd edgeever",
       deployCommand:
         "cp .env.local.example .env.local\nbun install\nEDGE_EVER_PASSWORD='<你的密码>' bun run deploy:setup\nbun run deploy:doctor\nbun run deploy",

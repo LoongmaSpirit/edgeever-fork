@@ -38,7 +38,7 @@ tags: [evernote, migration, self-hosted, mcp]
 你是 AI 编程助手。请帮我把本地的印象笔记全量迁移到我当前部署的 EdgeEver 实例中：
 1. 检查并使用 `pipx install evernote-backup` 自动安装备份工具。
 2. 提示我输入印象笔记的用户名和密码并初始化数据库（指定 china 后端），随后同步数据并导出到 `./evernote-export` 目录。
-3. 从 GitHub 下载最新版迁移脚本：`https://raw.githubusercontent.com/msh01/edgeever/main/scripts/import-evernote-enex-via-mcp.mjs` 到本地。
+3. 从 GitHub 下载最新版迁移脚本：`https://raw.githubusercontent.com/tianma-if/edgeever/main/scripts/import-evernote-enex-via-mcp.mjs` 到本地。
 4. 安装脚本所需的本地图片压缩库 `sharp` 和 `fast-xml-parser` 依赖。
 5. 使用先前配置的 URL 和 Token 运行该脚本完成迁移（脚本会自动进行 WebP 图片转换）：
    - 全量迁移：`bun import-evernote-enex-via-mcp.mjs --input "./evernote-export" --yes`
@@ -47,7 +47,7 @@ tags: [evernote, migration, self-hosted, mcp]
 请告诉我你需要什么信息（如账号密码），收到后直接并发自动执行上述步骤。
 ```
 
-> 手动模式备用：如果不使用 AI 助手，也可以前往 GitHub 仓库 [EdgeEver GitHub](https://github.com/msh01/edgeever) 下载 `scripts/import-evernote-enex-via-mcp.mjs` 脚本，并按脚本头部注释执行。
+> 手动模式备用：如果不使用 AI 助手，也可以前往 GitHub 仓库 [EdgeEver GitHub](https://github.com/tianma-if/edgeever) 下载 `scripts/import-evernote-enex-via-mcp.mjs` 脚本，并按脚本头部注释执行。
 
 ---
 
