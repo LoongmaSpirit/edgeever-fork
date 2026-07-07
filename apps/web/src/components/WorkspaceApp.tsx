@@ -79,6 +79,14 @@ const isStandaloneApp = () =>
   window.matchMedia("(display-mode: fullscreen)").matches ||
   Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
 
+const openStandaloneMobileEditor = (memoId: string) => {
+  const params = new URLSearchParams({
+    memoId,
+    returnTo: "/",
+  });
+  window.location.href = `/mobile-edit.html#${params.toString()}`;
+};
+
 const getVerticalScrollContainer = (target: EventTarget | null) => {
   let element = target instanceof HTMLElement ? target : null;
 
@@ -1255,6 +1263,9 @@ export const WorkspaceApp = ({
       setSelectedMemoId(data.memo.id);
       setActivePane("editor");
 
+      if (!isDesktopViewport()) {
+        openStandaloneMobileEditor(data.memo.id);
+      }
     },
   });
 
