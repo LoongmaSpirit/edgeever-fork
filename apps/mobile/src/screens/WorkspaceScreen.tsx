@@ -3115,7 +3115,8 @@ const RevisionHistoryModal = ({
 
   const revisions = revisionsQuery.data?.revisions ?? [];
   const selectedRevision = revisions.find((revision) => revision.id === selectedRevisionId) ?? revisions[0] ?? null;
-  const changedLines = selectedRevision ? countChangedLines(selectedRevision.contentMarkdown, memo?.contentMarkdown ?? "") : 0;
+  const diffRows = selectedRevision ? buildRevisionDiffRows(selectedRevision.contentMarkdown, memo?.contentMarkdown ?? "") : null;
+  const changedLines = diffRows?.changed ?? 0;
 
   useEffect(() => {
     if (memo && revisions.length > 0 && !selectedRevisionId) {
@@ -3213,11 +3214,11 @@ const RevisionHistoryModal = ({
                 </ActionButton>
                 <View style={styles.revisionPreviewBlock}>
                   <Text style={styles.label}>历史版本</Text>
-                  <Text style={styles.revisionPreviewText}>{selectedRevision.contentMarkdown || selectedRevision.contentText || "没有正文内容"}</Text>
+                  <RevisionDiffPreview rows={diffRows?.leftRows ?? []} tone="history" />
                 </View>
                 <View style={styles.revisionPreviewBlock}>
                   <Text style={styles.label}>当前内容</Text>
-                  <Text style={styles.revisionPreviewText}>{memo?.contentMarkdown || memo?.contentText || "没有正文内容"}</Text>
+                  <RevisionDiffPreview rows={diffRows?.rightRows ?? []} tone="current" />
                 </View>
               </>
             ) : null}
@@ -3228,6 +3229,36 @@ const RevisionHistoryModal = ({
         )}
       </SafeAreaView>
     </Modal>
+  );
+};
+
+const RevisionDiffPreview = ({ rows, tone }: { rows: DiffRow[]; tone: "history" | "current" }) => {
+  const hasContent = rows.some((row) => row.text);
+
+  if (!hasContent) {
+    return <Text style={styles.mutedText}>没有正文内容</Text>;
+  }
+
+  return (
+    <View style={styles.revisionDiffTable}>
+      {rows.map((row) => {
+        const changed = row.state === "changed";
+
+        return (
+          <View
+            key={row.lineNumber}
+            style={[
+              styles.revisionDiffRow,
+              changed && tone === "history" && styles.revisionDiffRowHistory,
+              changed && tone === "current" && styles.revisionDiffRowCurrent,
+            ]}
+          >
+            <Text style={styles.revisionDiffLineNumber}>{row.lineNumber}</Text>
+            <Text style={[styles.revisionDiffText, row.state === "empty" && styles.revisionDiffTextEmpty]}>{row.text || " "}</Text>
+          </View>
+        );
+      })}
+    </View>
   );
 };
 
@@ -4731,19 +4762,42 @@ const buildMcpRemoteConfig = (baseUrl: string, token: string) =>
     2
   );
 
-const countChangedLines = (left: string, right: string) => {
+type DiffRow = {
+  lineNumber: number;
+  text: string;
+  state: "same" | "changed" | "empty";
+};
+
+const buildRevisionDiffRows = (left: string, right: string) => {
   const leftLines = left.split("\n");
   const rightLines = right.split("\n");
-  const maxLines = Math.max(leftLines.length, rightLines.length);
+  const maxLines = Math.max(leftLines.length, rightLines.length, 1);
+  const leftRows: DiffRow[] = [];
+  const rightRows: DiffRow[] = [];
   let changed = 0;
 
   for (let index = 0; index < maxLines; index += 1) {
-    if ((leftLines[index] ?? "") !== (rightLines[index] ?? "")) {
+    const leftText = leftLines[index] ?? "";
+    const rightText = rightLines[index] ?? "";
+    const isChanged = leftText !== rightText;
+
+    if (isChanged) {
       changed += 1;
     }
+
+    leftRows.push({
+      lineNumber: index + 1,
+      text: leftText,
+      state: isChanged ? "changed" : leftText ? "same" : "empty",
+    });
+    rightRows.push({
+      lineNumber: index + 1,
+      text: rightText,
+      state: isChanged ? "changed" : rightText ? "same" : "empty",
+    });
   }
 
-  return changed;
+  return { changed, leftRows, rightRows };
 };
 
 const formatRevisionActor = (actor: string) => {
@@ -5832,6 +5886,45 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontSize: 13,
     lineHeight: 20,
+  },
+  revisionDiffTable: {
+    borderColor: "#e2e8f0",
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  revisionDiffRow: {
+    borderBottomColor: "#f1f5f9",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    minHeight: 28,
+  },
+  revisionDiffRowHistory: {
+    backgroundColor: "#fffbeb",
+  },
+  revisionDiffRowCurrent: {
+    backgroundColor: "#ecfdf5",
+  },
+  revisionDiffLineNumber: {
+    borderRightColor: "#e2e8f0",
+    borderRightWidth: 1,
+    color: "#94a3b8",
+    fontSize: 11,
+    minWidth: 42,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    textAlign: "right",
+  },
+  revisionDiffText: {
+    color: "#334155",
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  revisionDiffTextEmpty: {
+    color: "#94a3b8",
   },
   label: {
     color: "#334155",
