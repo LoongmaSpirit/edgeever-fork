@@ -2536,6 +2536,7 @@ const ApiTokensModal = ({ baseUrl, onClose, visible }: { baseUrl: string; onClos
   const queryClient = useQueryClient();
   const [name, setName] = useState("MCP Agent");
   const [selectedScopes, setSelectedScopes] = useState<Set<string>>(() => new Set(ALL_TOKEN_SCOPES));
+  const [scopeDefaultsSynced, setScopeDefaultsSynced] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
@@ -2555,10 +2556,13 @@ const ApiTokensModal = ({ baseUrl, onClose, visible }: { baseUrl: string; onClos
   const tokens = tokensQuery.data?.apiTokens ?? [];
 
   useEffect(() => {
-    if (tokensQuery.data?.availableScopes) {
-      setSelectedScopes(new Set(tokensQuery.data.availableScopes));
+    if (scopeDefaultsSynced || !tokensQuery.data?.availableScopes) {
+      return;
     }
-  }, [tokensQuery.data?.availableScopes]);
+
+    setSelectedScopes(new Set(tokensQuery.data.availableScopes));
+    setScopeDefaultsSynced(true);
+  }, [scopeDefaultsSynced, tokensQuery.data?.availableScopes]);
 
   const createTokenMutation = useMutation({
     mutationFn: async () => {
