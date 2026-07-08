@@ -121,7 +121,7 @@ const EVERNOTE_MIGRATION_PROMPT = `你是 AI 编程助手。请帮我把本地�
    - 指定迁移某些笔记本：追加 \`--include "笔记本A,笔记本B"\` 参数。
 
 请告诉我你需要什么信息（如账号密码），收到后直接并发自动执行上述步骤。`;
-const MEMO_TEMPLATES: MemoTemplate[] = [
+const MOBILE_MEMO_TEMPLATES_ZH: MemoTemplate[] = [
   {
     id: "quick-note",
     title: "速记",
@@ -155,6 +155,43 @@ const MEMO_TEMPLATES: MemoTemplate[] = [
     title: "每日复盘",
     description: "记录今天完成了什么、卡在哪里。",
     contentMarkdown: "## 每日复盘\n\n## 今天完成\n\n- \n\n## 遇到的问题\n\n- \n\n## 明天优先级\n\n- [ ] ",
+    tags: ["template", "daily"],
+  },
+];
+const MOBILE_MEMO_TEMPLATES_EN: MemoTemplate[] = [
+  {
+    id: "quick-note",
+    title: "Quick note",
+    description: "For temporary ideas, links, and sparks.",
+    contentMarkdown: "## Quick note\n\n- \n\n## Next actions\n\n- [ ] ",
+    tags: ["template", "quick-note"],
+  },
+  {
+    id: "meeting",
+    title: "Meeting notes",
+    description: "Keep agenda, decisions, and todos on one page.",
+    contentMarkdown: "## Meeting notes\n\nTime:\nAttendees:\n\n## Agenda\n\n- \n\n## Decisions\n\n- \n\n## Todos\n\n- [ ] ",
+    tags: ["template", "meeting"],
+  },
+  {
+    id: "checklist",
+    title: "Checklist",
+    description: "Quickly list tasks, shopping items, or project checks.",
+    contentMarkdown: "## Checklist\n\n- [ ] \n- [ ] \n- [ ] ",
+    tags: ["template", "checklist"],
+  },
+  {
+    id: "reading",
+    title: "Reading notes",
+    description: "Collect excerpts, ideas, and follow-up reading.",
+    contentMarkdown: "## Reading notes\n\nBook:\nAuthor:\n\n## Excerpts\n\n> \n\n## My thoughts\n\n\n## Follow-up questions\n\n- ",
+    tags: ["template", "reading"],
+  },
+  {
+    id: "daily",
+    title: "Daily review",
+    description: "Record what you finished today and where you got stuck.",
+    contentMarkdown: "## Daily review\n\n## Done today\n\n- \n\n## Blockers\n\n- \n\n## Tomorrow's priorities\n\n- [ ] ",
     tags: ["template", "daily"],
   },
 ];
@@ -2012,8 +2049,10 @@ const TemplatesModal = ({
 }) => {
   const { client } = useSession();
   const queryClient = useQueryClient();
+  const localePreference = useMobileLocalePreference();
   const fallbackNotebookId = activeNotebookId !== ALL_NOTES_ID ? activeNotebookId : notebooks[0]?.id ?? "";
   const [targetNotebookId, setTargetNotebookId] = useState(fallbackNotebookId);
+  const memoTemplates = useMemo(() => getMobileMemoTemplates(localePreference), [localePreference]);
 
   useEffect(() => {
     if (visible) {
@@ -2070,7 +2109,7 @@ const TemplatesModal = ({
               <Text style={styles.warningText}>当前无法创建笔记，请先创建可用笔记本。</Text>
             </View>
           ) : null}
-          {MEMO_TEMPLATES.map((template) => (
+          {memoTemplates.map((template) => (
             <Pressable
               disabled={!targetNotebookId || createFromTemplateMutation.isPending}
               key={template.id}
@@ -5262,6 +5301,9 @@ const isNotebookDescendant = (notebooks: Notebook[], candidateNotebookId: string
 
 const getResolvedMobileLocale = (localePreference: MobileLocaleMode) =>
   localePreference === "system" ? Intl.DateTimeFormat().resolvedOptions().locale || "zh-CN" : localePreference;
+
+const getMobileMemoTemplates = (localePreference: MobileLocaleMode) =>
+  getResolvedMobileLocale(localePreference).startsWith("en") ? MOBILE_MEMO_TEMPLATES_EN : MOBILE_MEMO_TEMPLATES_ZH;
 
 const formatDate = (value: string, localePreference: MobileLocaleMode = "system") =>
   new Intl.DateTimeFormat(getResolvedMobileLocale(localePreference), {
