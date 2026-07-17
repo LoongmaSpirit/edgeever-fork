@@ -2,7 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ApiRequestError, type createEdgeEverClient } from "@edgeever/client";
 import type { MemoDetail } from "@edgeever/shared";
 
-const SYNC_QUEUE_KEY = "edgeever.mobile.syncQueue.v1";
+const LEGACY_SYNC_QUEUE_KEY = "edgeever.mobile.syncQueue.v1";
+const SYNC_QUEUE_KEY_PREFIX = "edgeever.mobile.syncQueue.v2";
 
 export type MobileMemoUpdateSyncPayload = {
   memoId: string;
@@ -25,7 +26,10 @@ export type MobileSyncQueueItem = {
   nextAttemptAt: string | null;
   createdAt: string;
   updatedAt: string;
+  version: number;
 };
+
+let syncQueueWriteChain: Promise<void> = Promise.resolve();
 
 export type MobileSyncQueueSummary = {
   total: number;
@@ -52,40 +56,57 @@ export const emptyMobileSyncQueueSummary = (): MobileSyncQueueSummary => ({
 
 export const getMobileMemoUpdateQueueId = (memoId: string) => `memo.update:${memoId}`;
 
-export const queueMobileMemoUpdate = async (payload: MobileMemoUpdateSyncPayload) => {
+export const queueMobileMemoUpdate = async (scope: string, payload: MobileMemoUpdateSyncPayload) => {
   const now = new Date().toISOString();
-  const items = await readMobileSyncQueue();
   const id = getMobileMemoUpdateQueueId(payload.memoId);
-  const existing = items.find((item) => item.id === id);
-  const nextItem: MobileSyncQueueItem = {
-    id,
-    kind: "memo.update",
-    memoId: payload.memoId,
-    status: "pending",
-    payload,
-    attemptCount: existing?.attemptCount ?? 0,
-    lastError: null,
-    nextAttemptAt: null,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
+  await mutateMobileSyncQueue(scope, (items) => {
+    const existing = items.find((item) => item.id === id);
+    const nextItem: MobileSyncQueueItem = {
+      id,
+      kind: "memo.update",
+      memoId: payload.memoId,
+      status: "pending",
+      payload,
+      attemptCount: existing?.attemptCount ?? 0,
+      lastError: null,
+      nextAttemptAt: null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      version: (existing?.version ?? 0) + 1,
+    };
 
-  await writeMobileSyncQueue([nextItem, ...items.filter((item) => item.id !== id)]);
-  return summarizeMobileSyncQueue(await readMobileSyncQueue());
+    return [nextItem, ...items.filter((item) => item.id !== id)];
+  });
+  return summarizeMobileSyncQueue(await readMobileSyncQueue(scope));
 };
 
-export const loadMobileSyncQueueSummary = async () => summarizeMobileSyncQueue(await readMobileSyncQueue());
+export const loadMobileSyncQueueSummary = async (scope: string) => summarizeMobileSyncQueue(await readMobileSyncQueue(scope));
 
-export const listMobileSyncQueueItems = async () =>
-  (await readMobileSyncQueue()).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+export const getMobileSyncRetryDelay = async (scope: string) => {
+  const now = Date.now();
+  const retryTimes = (await readMobileSyncQueue(scope))
+    .filter((item) => item.status === "pending" || item.status === "error" || item.status === "syncing")
+    .map((item) => (item.nextAttemptAt ? Date.parse(item.nextAttemptAt) : now))
+    .filter(Number.isFinite);
 
-export const deleteMobileSyncQueueItem = async (id: string) => {
-  await removeMobileSyncQueueItem(id);
-  return loadMobileSyncQueueSummary();
+  if (retryTimes.length === 0) {
+    return null;
+  }
+
+  return Math.max(250, Math.min(...retryTimes) - now);
+};
+
+export const listMobileSyncQueueItems = async (scope: string) =>
+  (await readMobileSyncQueue(scope)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+export const deleteMobileSyncQueueItem = async (scope: string, id: string) => {
+  await removeMobileSyncQueueItem(scope, id);
+  return loadMobileSyncQueueSummary(scope);
 };
 
 export const syncMobileQueuedChanges = async (
   client: ReturnType<typeof createEdgeEverClient>,
+  scope: string,
   options: {
     onSynced?: (memo: MemoDetail) => void | Promise<void>;
   } = {}
@@ -97,34 +118,40 @@ export const syncMobileQueuedChanges = async (
     conflicted: 0,
   };
   const now = new Date();
-  const items = (await readMobileSyncQueue())
+  const items = (await readMobileSyncQueue(scope))
     .filter((item) => item.status === "pending" || item.status === "error" || item.status === "syncing")
     .filter((item) => !item.nextAttemptAt || new Date(item.nextAttemptAt) <= now)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
   for (const item of items) {
+    const itemVersion = item.version ?? 1;
     result.attempted += 1;
-    await updateMobileSyncQueueItem(item.id, {
+    await updateMobileSyncQueueItem(scope, item.id, {
       status: "syncing",
       updatedAt: new Date().toISOString(),
-    });
+    }, itemVersion);
 
     try {
       const memo = await syncMobileQueueItem(client, item);
-      await removeMobileSyncQueueItem(item.id);
-      await options.onSynced?.(memo);
+      const removed = await removeMobileSyncQueueItem(scope, item.id, itemVersion);
+
+      if (removed) {
+        await options.onSynced?.(memo);
+      } else {
+        await rebaseQueuedMemoUpdate(scope, item.id, itemVersion, memo);
+      }
       result.synced += 1;
     } catch (error) {
       const status = isRevisionConflict(error) ? "conflict" : "error";
       const attemptCount = item.attemptCount + 1;
 
-      await updateMobileSyncQueueItem(item.id, {
+      await updateMobileSyncQueueItem(scope, item.id, {
         status,
         attemptCount,
         lastError: getErrorMessage(error),
         nextAttemptAt: status === "error" ? nextRetryAt(attemptCount) : null,
         updatedAt: new Date().toISOString(),
-      });
+      }, itemVersion);
 
       if (status === "conflict") {
         result.conflicted += 1;
@@ -168,8 +195,18 @@ const syncMobileQueueItem = async (client: ReturnType<typeof createEdgeEverClien
   return response.memo;
 };
 
-const readMobileSyncQueue = async (): Promise<MobileSyncQueueItem[]> => {
-  const rawValue = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
+const readMobileSyncQueue = async (scope: string): Promise<MobileSyncQueueItem[]> => {
+  const storageKey = getSyncQueueStorageKey(scope);
+  let rawValue = await AsyncStorage.getItem(storageKey);
+
+  if (!rawValue) {
+    const legacyValue = await AsyncStorage.getItem(LEGACY_SYNC_QUEUE_KEY);
+    if (legacyValue) {
+      rawValue = legacyValue;
+      await AsyncStorage.setItem(storageKey, legacyValue);
+      await AsyncStorage.removeItem(LEGACY_SYNC_QUEUE_KEY);
+    }
+  }
 
   if (!rawValue) {
     return [];
@@ -183,17 +220,73 @@ const readMobileSyncQueue = async (): Promise<MobileSyncQueueItem[]> => {
   }
 };
 
-const writeMobileSyncQueue = (items: MobileSyncQueueItem[]) => AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(items));
+const writeMobileSyncQueue = (scope: string, items: MobileSyncQueueItem[]) =>
+  AsyncStorage.setItem(getSyncQueueStorageKey(scope), JSON.stringify(items));
 
-const updateMobileSyncQueueItem = async (id: string, patch: Partial<MobileSyncQueueItem>) => {
-  const items = await readMobileSyncQueue();
-  await writeMobileSyncQueue(items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+const updateMobileSyncQueueItem = async (scope: string, id: string, patch: Partial<MobileSyncQueueItem>, expectedVersion?: number) => {
+  let updated = false;
+  await mutateMobileSyncQueue(scope, (items) =>
+    items.map((item) => {
+      if (item.id !== id || (expectedVersion !== undefined && (item.version ?? 1) !== expectedVersion)) {
+        return item;
+      }
+
+      updated = true;
+      return { ...item, ...patch };
+    })
+  );
+  return updated;
 };
 
-const removeMobileSyncQueueItem = async (id: string) => {
-  const items = await readMobileSyncQueue();
-  await writeMobileSyncQueue(items.filter((item) => item.id !== id));
+const removeMobileSyncQueueItem = async (scope: string, id: string, expectedVersion?: number) => {
+  let removed = false;
+  await mutateMobileSyncQueue(scope, (items) =>
+    items.filter((item) => {
+      if (item.id !== id || (expectedVersion !== undefined && (item.version ?? 1) !== expectedVersion)) {
+        return true;
+      }
+
+      removed = true;
+      return false;
+    })
+  );
+  return removed;
 };
+
+const rebaseQueuedMemoUpdate = async (scope: string, id: string, syncedVersion: number, memo: MemoDetail) => {
+  await mutateMobileSyncQueue(scope, (items) =>
+    items.map((item) => {
+      if (item.id !== id || (item.version ?? 1) <= syncedVersion) {
+        return item;
+      }
+
+      return {
+        ...item,
+        payload: {
+          ...item.payload,
+          expectedRevision: memo.revision,
+          expectedContentHash: memo.contentHash,
+        },
+        status: "pending",
+        lastError: null,
+        nextAttemptAt: null,
+        updatedAt: new Date().toISOString(),
+      };
+    })
+  );
+};
+
+const mutateMobileSyncQueue = async (scope: string, mutate: (items: MobileSyncQueueItem[]) => MobileSyncQueueItem[]) => {
+  const operation = syncQueueWriteChain.then(async () => {
+    const items = await readMobileSyncQueue(scope);
+    await writeMobileSyncQueue(scope, mutate(items));
+  });
+
+  syncQueueWriteChain = operation.catch(() => undefined);
+  await operation;
+};
+
+const getSyncQueueStorageKey = (scope: string) => `${SYNC_QUEUE_KEY_PREFIX}:${encodeURIComponent(scope.trim().toLowerCase())}`;
 
 const summarizeMobileSyncQueue = (items: MobileSyncQueueItem[]) =>
   items.reduce((summary, item) => {

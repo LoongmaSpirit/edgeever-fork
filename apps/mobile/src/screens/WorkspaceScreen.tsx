@@ -1,5 +1,5 @@
 import { createContext, lazy, memo, Suspense, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { keepPreviousData, useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import type { DocumentPickerAsset } from "expo-document-picker";
@@ -95,10 +95,10 @@ import { useSession } from "../lib/session";
 import {
   deleteMobileSyncQueueItem,
   emptyMobileSyncQueueSummary,
+  getMobileSyncRetryDelay,
   listMobileSyncQueueItems,
   loadMobileSyncQueueSummary,
   queueMobileMemoUpdate,
-  shouldQueueMobileMemoSaveError,
   syncMobileQueuedChanges,
   type MobileSyncQueueItem,
   type MobileSyncQueueSummary,
@@ -297,6 +297,7 @@ type MarkdownAction = "heading" | "bold" | "italic" | "bullet" | "checklist" | "
 export const WorkspaceScreen = () => {
   const { client, session, signOut } = useSession();
   const queryClient = useQueryClient();
+  const syncQueueScope = session?.baseUrl ?? "";
   const [activeView, setActiveView] = useState<MobileView>("notes");
   const [activeNotebookId, setActiveNotebookId] = useState<string>(ALL_NOTES_ID);
   const [memoView, setMemoView] = useState<MemoView>("notebook");
@@ -331,8 +332,9 @@ export const WorkspaceScreen = () => {
   const [syncQueueSummary, setSyncQueueSummary] = useState<MobileSyncQueueSummary>(() => emptyMobileSyncQueueSummary());
   const [syncQueueMessage, setSyncQueueMessage] = useState("");
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
-  const [lastAutoSyncAt, setLastAutoSyncAt] = useState<string | null>(null);
   const autoSyncRunningRef = useRef(false);
+  const autoSyncRequestedRef = useRef(false);
+  const autoSyncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debouncedSearchText = useDebouncedValue(searchText.trim(), 250);
 
   const notebooksQuery = useQuery({
@@ -417,7 +419,7 @@ export const WorkspaceScreen = () => {
       queryClient.invalidateQueries({ queryKey: ["mobile", "search"] }),
       queryClient.invalidateQueries({ queryKey: ["mobile", "memo"] }),
     ]);
-    setSyncQueueSummary(await loadMobileSyncQueueSummary());
+    setSyncQueueSummary(await loadMobileSyncQueueSummary(syncQueueScope));
   };
 
   const handleMemoPress = (memoId: string) => {
@@ -522,16 +524,25 @@ export const WorkspaceScreen = () => {
   useEffect(() => {
     let mounted = true;
 
-    loadMobileSyncQueueSummary().then((summary) => {
-      if (mounted) {
-        setSyncQueueSummary(summary);
+    Promise.all([loadMobileSyncQueueSummary(syncQueueScope), listMobileSyncQueueItems(syncQueueScope)]).then(([summary, items]) => {
+      if (!mounted) {
+        return;
+      }
+
+      setSyncQueueSummary(summary);
+      for (const item of items) {
+        const cachedMemo = findCachedMemoDetail(queryClient, item.memoId);
+        if (cachedMemo) {
+          const optimisticMemo = createOptimisticMemo(cachedMemo, item.payload);
+          applyOptimisticMemoToCache(queryClient, cachedMemo, { ...optimisticMemo, updatedAt: item.updatedAt });
+        }
       }
     });
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [queryClient, syncQueueScope]);
 
   useEffect(() => {
     let mounted = true;
@@ -643,6 +654,30 @@ export const WorkspaceScreen = () => {
     onSuccess: async (memo) => {
       await invalidateWorkspace();
       queryClient.setQueryData(["mobile", "memo", memoView, memo.id], { memo });
+    },
+  });
+
+  const localUpdateMemoMutation = useMutation({
+    mutationFn: async ({ memo, payload }: { memo: MemoDetail; payload: { title?: string; contentMarkdown?: string; isPinned?: boolean; notebookId?: string; tags?: string[] } }) => {
+      const optimisticMemo = createOptimisticMemo(memo, payload);
+
+      await queueMobileMemoUpdate(syncQueueScope, {
+        memoId: memo.id,
+        expectedRevision: memo.revision,
+        expectedContentHash: memo.contentHash,
+        title: optimisticMemo.title?.trim() || DEFAULT_MEMO_TITLE,
+        contentMarkdown: optimisticMemo.contentMarkdown,
+        notebookId: optimisticMemo.notebookId,
+        tags: optimisticMemo.tags,
+      });
+
+      return optimisticMemo;
+    },
+    onSuccess: async (memo, variables) => {
+      applyOptimisticMemoToCache(queryClient, variables.memo, memo);
+      setSyncQueueSummary(await loadMobileSyncQueueSummary(syncQueueScope));
+      setSyncQueueMessage("已保存到本地，正在后台同步");
+      void runAutomaticSync();
     },
   });
 
@@ -852,17 +887,20 @@ export const WorkspaceScreen = () => {
     setSyncQueueMessage("");
 
     try {
-      const result = await syncMobileQueuedChanges(client, {
+      const result = await syncMobileQueuedChanges(client, syncQueueScope, {
         onSynced: async (memo) => {
           queryClient.setQueryData(["mobile", "memo", "notebook", memo.id], { memo });
           queryClient.setQueryData(["mobile", "memo", "trash", memo.id], { memo });
         },
       });
-      await invalidateWorkspace();
-      setSyncQueueSummary(await loadMobileSyncQueueSummary());
+      const nextSummary = await loadMobileSyncQueueSummary(syncQueueScope);
+      if (nextSummary.total === 0) {
+        await invalidateWorkspace();
+      }
+      setSyncQueueSummary(nextSummary);
       setSyncQueueMessage(result.attempted === 0 ? "没有可同步的变更" : `已同步 ${result.synced} 条，失败 ${result.failed + result.conflicted} 条`);
     } catch (error) {
-      setSyncQueueSummary(await loadMobileSyncQueueSummary());
+      setSyncQueueSummary(await loadMobileSyncQueueSummary(syncQueueScope));
       setSyncQueueMessage(error instanceof Error ? error.message : "同步失败");
     } finally {
       setIsSyncingQueue(false);
@@ -870,13 +908,23 @@ export const WorkspaceScreen = () => {
   };
 
   const runAutomaticSync = async () => {
-    if (!client || autoSyncRunningRef.current) {
+    if (!client) {
       return;
+    }
+
+    if (autoSyncRunningRef.current) {
+      autoSyncRequestedRef.current = true;
+      return;
+    }
+
+    if (autoSyncRetryTimerRef.current) {
+      clearTimeout(autoSyncRetryTimerRef.current);
+      autoSyncRetryTimerRef.current = null;
     }
 
     autoSyncRunningRef.current = true;
 
-    const summary = await loadMobileSyncQueueSummary();
+    const summary = await loadMobileSyncQueueSummary(syncQueueScope);
     setSyncQueueSummary(summary);
 
     if (summary.pending + summary.error + summary.syncing === 0) {
@@ -888,22 +936,36 @@ export const WorkspaceScreen = () => {
     setSyncQueueMessage("正在自动同步本地变更");
 
     try {
-      const result = await syncMobileQueuedChanges(client, {
+      const result = await syncMobileQueuedChanges(client, syncQueueScope, {
         onSynced: async (memo) => {
           queryClient.setQueryData(["mobile", "memo", "notebook", memo.id], { memo });
           queryClient.setQueryData(["mobile", "memo", "trash", memo.id], { memo });
         },
       });
-      await invalidateWorkspace();
-      setSyncQueueSummary(await loadMobileSyncQueueSummary());
-      setLastAutoSyncAt(new Date().toISOString());
+      const nextSummary = await loadMobileSyncQueueSummary(syncQueueScope);
+      if (nextSummary.total === 0) {
+        await invalidateWorkspace();
+      }
+      setSyncQueueSummary(nextSummary);
       setSyncQueueMessage(result.attempted === 0 ? "" : `自动同步完成：成功 ${result.synced} 条，失败 ${result.failed + result.conflicted} 条`);
     } catch (error) {
-      setSyncQueueSummary(await loadMobileSyncQueueSummary());
+      setSyncQueueSummary(await loadMobileSyncQueueSummary(syncQueueScope));
       setSyncQueueMessage(error instanceof Error ? error.message : "自动同步失败");
     } finally {
       setIsSyncingQueue(false);
       autoSyncRunningRef.current = false;
+      if (autoSyncRequestedRef.current) {
+        autoSyncRequestedRef.current = false;
+        void runAutomaticSync();
+      } else {
+        const retryDelay = await getMobileSyncRetryDelay(syncQueueScope);
+        if (retryDelay !== null) {
+          autoSyncRetryTimerRef.current = setTimeout(() => {
+            autoSyncRetryTimerRef.current = null;
+            void runAutomaticSync();
+          }, retryDelay);
+        }
+      }
     }
   };
 
@@ -920,8 +982,14 @@ export const WorkspaceScreen = () => {
       }
     });
 
-    return () => subscription.remove();
-  }, [client, lastAutoSyncAt]);
+    return () => {
+      subscription.remove();
+      if (autoSyncRetryTimerRef.current) {
+        clearTimeout(autoSyncRetryTimerRef.current);
+        autoSyncRetryTimerRef.current = null;
+      }
+    };
+  }, [client, syncQueueScope]);
 
   return (
     <MobileLocaleContext.Provider value={localePreference}>
@@ -1035,16 +1103,11 @@ export const WorkspaceScreen = () => {
         imageCompressionEnabled={imageCompressionEnabled}
         notebooks={notebooks}
         onClose={() => setEditingMemo(null)}
-        onQueued={async () => {
-          setEditingMemo(null);
-          setSyncQueueSummary(await loadMobileSyncQueueSummary());
-          setSyncQueueMessage("变更已保存到本地队列");
-        }}
         onSaved={(memo) => {
           setEditingMemo(null);
           setSelectedMemoId(memo.id);
         }}
-        updateMutation={updateMemoMutation}
+        updateMutation={localUpdateMemoMutation}
       /> : null}
       {richEditingMemo ? <RichEditorModal baseUrl={session?.baseUrl ?? ""} memo={richEditingMemo} notebooks={notebooks} onClose={closeRichEditor} token={session?.token ?? ""} /> : null}
       {notebookPickerOpen ? <NotebookPickerModal
@@ -1074,8 +1137,9 @@ export const WorkspaceScreen = () => {
       {advancedPlayOpen ? <AdvancedPlayModal onClose={() => setAdvancedPlayOpen(false)} visible /> : null}
       {syncQueueOpen ? <SyncQueueModal
         onClose={() => setSyncQueueOpen(false)}
-        onChanged={async () => setSyncQueueSummary(await loadMobileSyncQueueSummary())}
+        onChanged={async () => setSyncQueueSummary(await loadMobileSyncQueueSummary(syncQueueScope))}
         onSync={handleSyncQueuedChanges}
+        scope={syncQueueScope}
         visible
       /> : null}
       {systemInfoOpen ? <SystemInfoModal baseUrl={session?.baseUrl ?? ""} memoCount={memoCount} notebookCount={notebooks.length} onClose={() => setSystemInfoOpen(false)} visible /> : null}
@@ -3018,11 +3082,13 @@ const SyncQueueModal = ({
   onChanged,
   onClose,
   onSync,
+  scope,
   visible,
 }: {
   onChanged: () => void | Promise<void>;
   onClose: () => void;
   onSync: () => void | Promise<void>;
+  scope: string;
   visible: boolean;
 }) => {
   const [items, setItems] = useState<MobileSyncQueueItem[]>([]);
@@ -3032,7 +3098,7 @@ const SyncQueueModal = ({
   const refreshItems = async () => {
     setLoading(true);
     try {
-      setItems(await listMobileSyncQueueItems());
+      setItems(await listMobileSyncQueueItems(scope));
     } finally {
       setLoading(false);
     }
@@ -3042,7 +3108,7 @@ const SyncQueueModal = ({
     if (visible) {
       void refreshItems();
     }
-  }, [visible]);
+  }, [scope, visible]);
 
   const discardItem = (item: MobileSyncQueueItem) => {
     Alert.alert("丢弃本地变更？", "此操作会移除这条待同步记录，不会修改服务端笔记。", [
@@ -3051,7 +3117,7 @@ const SyncQueueModal = ({
         text: "丢弃",
         style: "destructive",
         onPress: async () => {
-          await deleteMobileSyncQueueItem(item.id);
+          await deleteMobileSyncQueueItem(scope, item.id);
           await onChanged();
           await refreshItems();
         },
@@ -4128,7 +4194,6 @@ const EditMemoModal = ({
   memo,
   notebooks,
   onClose,
-  onQueued,
   onSaved,
   updateMutation,
 }: {
@@ -4136,7 +4201,6 @@ const EditMemoModal = ({
   memo: MemoDetail | null;
   notebooks: Notebook[];
   onClose: () => void;
-  onQueued: () => void | Promise<void>;
   onSaved: (memo: MemoDetail) => void;
   updateMutation: UseMutationResult<
     MemoDetail,
@@ -4333,25 +4397,6 @@ const EditMemoModal = ({
           await clearMobileMemoDraft(savedMemo.id);
           setLoadedDraftUpdatedAt(null);
           onSaved(savedMemo);
-        },
-        onError: async (error) => {
-          if (!shouldQueueMobileMemoSaveError(error)) {
-            return;
-          }
-
-          await queueMobileMemoUpdate({
-            memoId: memo.id,
-            expectedRevision: memo.revision,
-            expectedContentHash: memo.contentHash,
-            title: title.trim() || DEFAULT_MEMO_TITLE,
-            contentMarkdown,
-            notebookId,
-            tags: parseTags(tagsText),
-          });
-          await clearMobileMemoDraft(memo.id);
-          await onQueued();
-          updateMutation.reset();
-          Alert.alert("已保存到本地队列", "网络恢复后可在设置页手动同步。");
         },
       }
     );
@@ -5573,6 +5618,152 @@ const prepareUploadAsset = async (
     };
   }
 };
+
+const createOptimisticMemo = (
+  memo: MemoDetail,
+  payload: {
+    title?: string;
+    contentMarkdown?: string;
+    isPinned?: boolean;
+    notebookId?: string;
+    tags?: string[];
+  }
+): MemoDetail => {
+  const contentMarkdown = payload.contentMarkdown ?? memo.contentMarkdown;
+  const contentText = markdownToLocalText(contentMarkdown);
+
+  return {
+    ...memo,
+    ...(payload.title !== undefined ? { title: payload.title } : {}),
+    ...(payload.isPinned !== undefined ? { isPinned: payload.isPinned } : {}),
+    ...(payload.notebookId !== undefined ? { notebookId: payload.notebookId } : {}),
+    ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+    ...(payload.contentMarkdown !== undefined
+      ? {
+          contentMarkdown,
+          contentText,
+          excerpt: contentText.slice(0, 180),
+        }
+      : {}),
+    updatedAt: new Date().toISOString(),
+  };
+};
+
+const applyOptimisticMemoToCache = (queryClient: QueryClient, previousMemo: MemoDetail, nextMemo: MemoDetail) => {
+  const detailQueries = queryClient.getQueryCache().findAll({ queryKey: ["mobile", "memo"] });
+
+  for (const query of detailQueries) {
+    const data = query.state.data as { memo?: MemoDetail } | undefined;
+    if (data?.memo?.id === nextMemo.id) {
+      queryClient.setQueryData(query.queryKey, { ...data, memo: nextMemo });
+    }
+  }
+
+  const listQueries = queryClient.getQueryCache().findAll({ queryKey: ["mobile", "memos"] });
+
+  for (const query of listQueries) {
+    const data = query.state.data as { memos?: MemoSummary[]; totalCount?: number; nextCursor?: string | null } | undefined;
+    if (!data?.memos) {
+      continue;
+    }
+
+    const previouslyMatched = memoMatchesListQuery(previousMemo, query.queryKey);
+    const nextMatches = memoMatchesListQuery(nextMemo, query.queryKey);
+    const withoutMemo = data.memos.filter((memo) => memo.id !== nextMemo.id);
+    const memos = nextMatches ? sortMemoSummaries([nextMemo, ...withoutMemo], query.queryKey[5]).slice(0, 50) : withoutMemo;
+    const totalCount = Math.max(0, (data.totalCount ?? data.memos.length) + (nextMatches ? 1 : 0) - (previouslyMatched ? 1 : 0));
+
+    queryClient.setQueryData(query.queryKey, { ...data, memos, totalCount });
+  }
+
+  const searchQueries = queryClient.getQueryCache().findAll({ queryKey: ["mobile", "search"] });
+  for (const query of searchQueries) {
+    const data = query.state.data as { memos?: MemoSummary[] } | undefined;
+    if (data?.memos?.some((memo) => memo.id === nextMemo.id)) {
+      queryClient.setQueryData(query.queryKey, {
+        ...data,
+        memos: data.memos.map((memo) => (memo.id === nextMemo.id ? nextMemo : memo)),
+      });
+    }
+  }
+
+  if (previousMemo.notebookId !== nextMemo.notebookId) {
+    queryClient.setQueriesData<{ notebooks: Notebook[] }>({ queryKey: ["mobile", "notebooks"] }, (data) => {
+      if (!data) {
+        return data;
+      }
+
+      return {
+        ...data,
+        notebooks: data.notebooks.map((notebook) => {
+          if (notebook.id === previousMemo.notebookId) {
+            return { ...notebook, memoCount: Math.max(0, notebook.memoCount - 1) };
+          }
+          if (notebook.id === nextMemo.notebookId) {
+            return { ...notebook, memoCount: notebook.memoCount + 1, lastMemoUpdatedAt: nextMemo.updatedAt };
+          }
+          return notebook;
+        }),
+      };
+    });
+  }
+};
+
+const findCachedMemoDetail = (queryClient: QueryClient, memoId: string) => {
+  const detailQueries = queryClient.getQueryCache().findAll({ queryKey: ["mobile", "memo"] });
+
+  for (const query of detailQueries) {
+    const data = query.state.data as { memo?: MemoDetail } | undefined;
+    if (data?.memo?.id === memoId) {
+      return data.memo;
+    }
+  }
+
+  return null;
+};
+
+const memoMatchesListQuery = (memo: MemoSummary, queryKey: readonly unknown[]) => {
+  const view = queryKey[2];
+  const notebookId = queryKey[3];
+  const filter = queryKey[4];
+
+  if ((view === "trash") !== memo.isDeleted) {
+    return false;
+  }
+  if (notebookId !== ALL_NOTES_ID && notebookId !== memo.notebookId) {
+    return false;
+  }
+  if (filter === "tagged" && memo.tags.length === 0) {
+    return false;
+  }
+  if (filter === "untagged" && memo.tags.length > 0) {
+    return false;
+  }
+  if (filter === "pinned" && !memo.isPinned) {
+    return false;
+  }
+
+  return true;
+};
+
+const sortMemoSummaries = (memos: MemoSummary[], sortMode: unknown) =>
+  [...memos].sort((left, right) => {
+    if (sortMode === "title-asc") {
+      return (left.title || DEFAULT_MEMO_TITLE).localeCompare(right.title || DEFAULT_MEMO_TITLE);
+    }
+    if (sortMode === "created-desc") {
+      return right.createdAt.localeCompare(left.createdAt);
+    }
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
+
+const markdownToLocalText = (markdown: string) =>
+  markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_>#~-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 const getCompressedImageSize = (width: number, height: number) => {
   if (width >= height) {

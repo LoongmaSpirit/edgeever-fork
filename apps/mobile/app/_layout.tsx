@@ -15,6 +15,9 @@ import { SessionProvider } from "../src/lib/session";
 void SplashScreen.preventAutoHideAsync();
 
 const MOBILE_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const MOBILE_CACHE_STALE_TIME = 5 * 60 * 1000;
+const MAX_PERSISTED_MEMO_LISTS = 12;
+const MAX_PERSISTED_MEMO_DETAILS = 20;
 
 export default function RootLayout() {
   const [queryClient] = useState(
@@ -26,7 +29,7 @@ export default function RootLayout() {
             networkMode: "offlineFirst",
             refetchOnReconnect: true,
             retry: 1,
-            staleTime: 30_000,
+            staleTime: MOBILE_CACHE_STALE_TIME,
           },
         },
       })
@@ -36,6 +39,26 @@ export default function RootLayout() {
       key: "edgeever.mobile.query-cache.v1",
       storage: AsyncStorage,
       throttleTime: 1_000,
+      serialize: (persistedClient) => {
+        const queries = persistedClient.clientState.queries;
+        const notebooks = queries.filter((query) => query.queryKey[1] === "notebooks");
+        const memoLists = queries
+          .filter((query) => query.queryKey[1] === "memos")
+          .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)
+          .slice(0, MAX_PERSISTED_MEMO_LISTS);
+        const memoDetails = queries
+          .filter((query) => query.queryKey[1] === "memo")
+          .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)
+          .slice(0, MAX_PERSISTED_MEMO_DETAILS);
+
+        return JSON.stringify({
+          ...persistedClient,
+          clientState: {
+            ...persistedClient.clientState,
+            queries: [...notebooks, ...memoLists, ...memoDetails],
+          },
+        });
+      },
     })
   );
 
@@ -49,14 +72,9 @@ export default function RootLayout() {
             dehydrateOptions: {
               shouldDehydrateQuery: (query) => {
                 const section = query.queryKey[1];
-                const isDefaultMemoList =
-                  section === "memos" &&
-                  query.queryKey[2] === "notebook" &&
-                  query.queryKey[3] === "all" &&
-                  query.queryKey[4] === "all" &&
-                  query.queryKey[5] === "updated-desc";
+                const isOfflineReadableData = section === "notebooks" || section === "memos" || section === "memo";
 
-                return query.state.status === "success" && (section === "notebooks" || isDefaultMemoList);
+                return query.state.status === "success" && isOfflineReadableData;
               },
             },
             maxAge: MOBILE_CACHE_MAX_AGE,
