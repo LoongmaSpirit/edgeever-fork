@@ -516,10 +516,10 @@ export const WorkspaceScreen = () => {
   const closeRichEditor = () => {
     const memoId = richEditingSession?.memo.id ?? null;
     setRichEditingSession(null);
+    setSelectedMemoId(null);
     if (memoId) {
       memoDraftPrefetchRef.current.delete(memoId);
       void loadMemoDraft(memoId);
-      setSelectedMemoId(memoId);
     }
   };
 
