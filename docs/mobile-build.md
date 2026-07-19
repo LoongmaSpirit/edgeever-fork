@@ -36,13 +36,13 @@ The APK is uploaded as a GitHub Actions artifact named `edgeever-android-debug-a
 
 ### GitHub Release APK
 
-Every formal GitHub Release must include a directly installable APK. Build the production-signed, multi-architecture APK on the release Mac:
+Every formal GitHub Release must include a directly installable APK. Build the production-signed `arm64-v8a` APK on the release Mac:
 
 ```sh
 bun run build:android:apk:local
 ```
 
-This produces `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`. Verify its application version, signer, and SHA-256 before uploading it to the matching GitHub Release. A release whose audited change range affects mobile runtime code, shared code used by mobile, mobile dependencies, native configuration, or APK build tooling must rebuild the APK from that release commit.
+This produces `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`. Verify its application version, signer, and SHA-256 before uploading it to the matching GitHub Release. Additional ABIs should only be published for an explicit compatibility need; the Play AAB continues to include all supported architectures. A release whose audited change range affects mobile runtime code, shared code used by mobile, mobile dependencies, native configuration, or APK build tooling must rebuild the APK from that release commit.
 
 If the audited change range does not affect the mobile binary, the most recent compatible, verified APK may be attached again without rebuilding. Keep its original versioned filename and checksum, and state the source release explicitly; never rename an older binary to the current release version.
 

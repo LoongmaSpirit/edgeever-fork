@@ -84,13 +84,14 @@ fi
 : "${ANDROID_KEY_PASSWORD:?请设置 ANDROID_KEY_PASSWORD}"
 
 PLAY_ARCHS="${EDGE_EVER_ANDROID_ARCHS:-armeabi-v7a,arm64-v8a,x86,x86_64}"
+APK_ARCHS="${EDGE_EVER_ANDROID_APK_ARCHS:-arm64-v8a}"
 KEYSTORE_FILE="$(cd "$(dirname "$ANDROID_KEYSTORE_FILE")" && pwd)/$(basename "$ANDROID_KEYSTORE_FILE")"
 
 if [[ "$MODE" == "apk" ]]; then
-  echo "构建生产签名 APK（${PLAY_ARCHS}）..."
+  echo "构建生产签名 APK（${APK_ARCHS}）..."
   ./gradlew assembleRelease \
     "${COMMON_ARGS[@]}" \
-    -PreactNativeArchitectures="$PLAY_ARCHS" \
+    -PreactNativeArchitectures="$APK_ARCHS" \
     -Pandroid.injected.signing.store.file="$KEYSTORE_FILE" \
     -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
     -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
