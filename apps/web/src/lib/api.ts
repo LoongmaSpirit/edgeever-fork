@@ -1,5 +1,6 @@
 import type {
   AuthSession,
+  LoginDeviceSession,
   InstanceUser,
   ApiToken,
   CreatedApiToken,
@@ -49,6 +50,7 @@ type ListApiTokensResponse = {
 
 type ListUsersResponse = { users: InstanceUser[] };
 type UserResponse = { user: InstanceUser };
+type ListLoginDeviceSessionsResponse = { sessions: LoginDeviceSession[] };
 
 type MemoResponse = {
   memo: MemoDetail;
@@ -118,6 +120,9 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 
 export const api = {
   getSession: () => request<AuthSession>("/api/v1/auth/session"),
+
+  listLoginDeviceSessions: () =>
+    request<ListLoginDeviceSessionsResponse>("/api/v1/auth/sessions"),
 
   login: (payload: { username: string; password: string }) =>
     request<AuthSession>("/api/v1/auth/login", {

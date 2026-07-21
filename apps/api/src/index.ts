@@ -490,6 +490,44 @@ app.get("/api/v1/auth/session", async (c) => {
   });
 });
 
+app.get("/api/v1/auth/sessions", async (c) => {
+  const auth = await authenticateRequest(c, true);
+
+  if (!auth || auth.kind !== "user" || !auth.actorId || !auth.sessionId) {
+    return unauthorized(c, "An interactive user session is required.");
+  }
+
+  const now = isoNow();
+  const rows = await c.env.DB.prepare(
+    `SELECT id, user_agent, expires_at, created_at, last_seen_at
+     FROM sessions
+     WHERE user_id = ?
+       AND revoked_at IS NULL
+       AND expires_at > ?
+     ORDER BY COALESCE(last_seen_at, created_at) DESC
+     LIMIT 50`
+  )
+    .bind(auth.actorId, now)
+    .all<{
+      id: string;
+      user_agent: string | null;
+      expires_at: string;
+      created_at: string;
+      last_seen_at: string | null;
+    }>();
+
+  return c.json({
+    sessions: rows.results.map((session) => ({
+      id: session.id,
+      userAgent: session.user_agent,
+      isCurrent: session.id === auth.sessionId,
+      createdAt: session.created_at,
+      lastSeenAt: session.last_seen_at ?? session.created_at,
+      expiresAt: session.expires_at,
+    })),
+  });
+});
+
 app.post("/api/v1/auth/login", zValidator("json", LoginSchema), async (c) => {
   const authMode = await getInstanceAuthMode(c.env);
   if (authMode === "unconfigured") {

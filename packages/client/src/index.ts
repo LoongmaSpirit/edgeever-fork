@@ -1,6 +1,7 @@
 import type {
   ApiToken,
   AuthSession,
+  LoginDeviceSession,
   InstanceUser,
   CreatedApiToken,
   JsonBackupMemo,
@@ -62,6 +63,10 @@ export type ListUsersResponse = {
 
 export type UserResponse = {
   user: InstanceUser;
+};
+
+export type ListLoginDeviceSessionsResponse = {
+  sessions: LoginDeviceSession[];
 };
 
 export type MemoResponse = {
@@ -166,6 +171,9 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
   return {
     getSession: () => request<AuthSession>("/api/v1/auth/session"),
+
+    listLoginDeviceSessions: () =>
+      request<ListLoginDeviceSessionsResponse>("/api/v1/auth/sessions"),
 
     login: (payload: { username: string; password: string }) =>
       request<AuthSession>("/api/v1/auth/login", {

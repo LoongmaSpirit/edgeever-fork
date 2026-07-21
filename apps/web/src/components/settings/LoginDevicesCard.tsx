@@ -1,0 +1,125 @@
+import { useQuery } from "@tanstack/react-query";
+import { Laptop, MonitorSmartphone, Smartphone, Tablet } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { api } from "@/lib/api";
+
+interface LoginDevicesCardProps {
+  authRequired: boolean;
+}
+
+type DeviceKind = "mobile" | "tablet" | "desktop" | "unknownDevice";
+
+const describeUserAgent = (userAgent: string | null) => {
+  if (!userAgent) return { deviceKind: "unknownDevice" as const, os: "", browser: "" };
+
+  const isTablet = /iPad|Tablet|PlayBook|Silk/i.test(userAgent) || (/Android/i.test(userAgent) && !/Mobile/i.test(userAgent));
+  const isMobile = !isTablet && /Mobile|iPhone|iPod|Android|IEMobile|Opera Mini|okhttp/i.test(userAgent);
+  const deviceKind: DeviceKind = isTablet ? "tablet" : isMobile ? "mobile" : "desktop";
+  const os = /Windows NT/i.test(userAgent)
+    ? "Windows"
+    : /iPad|iPhone|iPod/i.test(userAgent)
+      ? "iOS"
+      : /Android/i.test(userAgent)
+        ? "Android"
+        : /Mac OS X|Macintosh/i.test(userAgent)
+          ? "macOS"
+          : /CrOS/i.test(userAgent)
+            ? "ChromeOS"
+            : /Linux/i.test(userAgent)
+              ? "Linux"
+              : "";
+  const browser = /EdgeEver|okhttp/i.test(userAgent)
+    ? "EdgeEver"
+    : /EdgA?\//i.test(userAgent)
+    ? "Edge"
+    : /OPR\//i.test(userAgent)
+      ? "Opera"
+      : /CriOS|Chrome\//i.test(userAgent)
+        ? "Chrome"
+        : /FxiOS|Firefox\//i.test(userAgent)
+          ? "Firefox"
+          : /Safari\//i.test(userAgent)
+            ? "Safari"
+            : "";
+
+  return { deviceKind, os, browser };
+};
+
+const getDeviceIcon = (deviceKind: DeviceKind) => {
+  if (deviceKind === "mobile") return Smartphone;
+  if (deviceKind === "tablet") return Tablet;
+  if (deviceKind === "desktop") return Laptop;
+  return MonitorSmartphone;
+};
+
+const formatSessionTime = (value: string, locale: string) =>
+  new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+
+export const LoginDevicesCard = ({ authRequired }: LoginDevicesCardProps) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const sessionsQuery = useQuery({
+    queryKey: ["auth", "sessions"],
+    queryFn: api.listLoginDeviceSessions,
+    enabled: authRequired,
+  });
+
+  if (!authRequired) return null;
+
+  return (
+    <Card className="w-full min-w-0 overflow-hidden shadow-none">
+      <CardHeader className="p-4">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <MonitorSmartphone className="h-4 w-4 text-emerald-700" />
+          {t("loginDevices.title")}
+        </CardTitle>
+        <CardDescription>{t("loginDevices.description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="p-4 pt-0">
+        {sessionsQuery.isLoading ? <p className="text-sm text-slate-500">{t("loginDevices.loading")}</p> : null}
+        {sessionsQuery.isError ? <p className="text-sm font-medium text-rose-600" role="alert">{t("loginDevices.loadFailed")}</p> : null}
+        {sessionsQuery.data?.sessions.length === 0 ? <p className="text-sm text-slate-500">{t("loginDevices.empty")}</p> : null}
+        {sessionsQuery.data?.sessions.length ? (
+          <ul className="divide-y divide-slate-100">
+            {sessionsQuery.data.sessions.map((session) => {
+              const { deviceKind, os, browser } = describeUserAgent(session.userAgent);
+              const DeviceIcon = getDeviceIcon(deviceKind);
+              const details = [os, browser || t("loginDevices.unknownBrowser")].filter(Boolean).join(" · ");
+
+              return (
+                <li key={session.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                    <DeviceIcon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-800">{t(`loginDevices.${deviceKind}`)}</p>
+                      {session.isCurrent ? (
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          {t("loginDevices.current")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-slate-500" title={session.userAgent ?? undefined}>{details}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {t("loginDevices.lastSeen", { time: formatSessionTime(session.lastSeenAt, locale) })}
+                      <span aria-hidden="true"> · </span>
+                      {t("loginDevices.signedIn", { time: formatSessionTime(session.createdAt, locale) })}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+};
