@@ -227,6 +227,10 @@ If you want to migrate notes from other platforms to EdgeEver, please refer to t
 
 > 🐳 Docker-based self-hosting for VPS, NAS, and home servers is on the roadmap and will follow once the core features are stable. It is not yet available in current releases.
 
+## Acknowledgements
+
+- The visual design of the editor themes is inspired by [gzh-design-skill](https://github.com/isjiamu/gzh-design-skill), whose themes were originally created by Jiamu (甲木) × Moyu Xiaoli (摸鱼小李). Thanks for their open-source work.
+
 ## Disclaimer
 
 EdgeEver is an independent open-source note-taking application developed and maintained by individuals and the community. It is not affiliated with, authorized, sponsored, or endorsed by Evernote Corporation or its affiliates.

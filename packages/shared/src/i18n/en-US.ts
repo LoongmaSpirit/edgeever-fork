@@ -147,6 +147,17 @@ export const enUS = {
     imageCompressionAria: "Compress note images",
     mermaidThemeTitle: "Diagram theme",
     mermaidThemeDescription: "Choose the visual theme for diagrams in notes.",
+    editorThemeTitle: "Editor theme",
+    editorThemeDescription: "Choose a writing style for the note editor. Saved in this browser.",
+    editorThemes: {
+      default: "System default",
+      "moyu-green": "Moyu Green",
+      "red-white": "Red & White",
+      "graphite-minimal": "Graphite Minimal",
+      "zen-whitespace": "Zen Whitespace",
+      "moyu-ticket": "Moyu Ticket",
+      "olive-journal": "Olive Journal",
+    },
     mermaidThemes: {
       "zinc-light": "Zinc Light",
       "zinc-dark": "Zinc Dark",

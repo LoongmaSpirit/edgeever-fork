@@ -56,6 +56,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { EditorToolbar } from "./EditorToolbar";
 import { ThemeToggle } from "./ThemeToggle";
+import { useTheme } from "./ThemeProvider";
 import { RevisionHistoryDialog } from "./dialogs/RevisionHistoryDialog";
 import { api } from "@/lib/api";
 import { consumeStandaloneMobileEditorReturn, openStandaloneMobileEditor } from "@/lib/mobile-editor";
@@ -1114,6 +1115,7 @@ const RichEditorPane = ({
   onRequestMobileNativeEdit,
 }: RichEditorPaneProps) => {
   const { t } = useTranslation();
+  const { editorTheme } = useTheme();
   const queryClient = useQueryClient();
   const isSelectionMode = Boolean(selectionActionBar);
   const [title, setTitle] = useState("");
@@ -2807,6 +2809,7 @@ const RichEditorPane = ({
 
       <div
         ref={editorScrollContainerRef}
+        data-editor-theme={editorTheme}
         className={cn(
           "edgeever-editor relative min-h-0 flex-1 bg-white",
           useMobilePlainTextEditor ? "overflow-visible" : "overflow-y-auto"

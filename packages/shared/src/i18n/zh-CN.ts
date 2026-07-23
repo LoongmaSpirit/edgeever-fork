@@ -147,6 +147,17 @@ export const zhCN = {
     imageCompressionAria: "是否压缩笔记内图片",
     mermaidThemeTitle: "图表主题",
     mermaidThemeDescription: "选择笔记中图表的视觉主题。",
+    editorThemeTitle: "编辑器主题",
+    editorThemeDescription: "选择正文编辑区的排版风格，偏好会保存在当前浏览器中。",
+    editorThemes: {
+      default: "系统默认",
+      "moyu-green": "摸鱼绿",
+      "red-white": "红白色系",
+      "graphite-minimal": "石墨极简风",
+      "zen-whitespace": "留白禅意风",
+      "moyu-ticket": "摸鱼票据风",
+      "olive-journal": "橄榄手记",
+    },
     mermaidThemes: {
       "zinc-light": "Zinc 浅色",
       "zinc-dark": "Zinc 深色",
