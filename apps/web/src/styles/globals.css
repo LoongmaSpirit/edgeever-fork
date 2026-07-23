@@ -326,7 +326,31 @@ textarea {
 
 .ProseMirror .edgeever-code-block,
 .ProseMirror .edgeever-mermaid-code-block {
+  position: relative;
   margin: 0 0 1rem;
+}
+
+.ProseMirror .edgeever-code-copy-button {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 1;
+  border: 1px solid #cbded1;
+  border-radius: 5px;
+  padding: 0.2rem 0.45rem;
+  background: rgb(247 251 248 / 0.92);
+  color: #475569;
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ProseMirror .edgeever-code-copy-button:hover,
+.ProseMirror .edgeever-code-copy-button:focus-visible {
+  border-color: #0f766e;
+  color: #0f766e;
+  outline: none;
 }
 
 .ProseMirror .edgeever-code-source {
@@ -339,6 +363,7 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.875em;
   white-space: pre;
+  padding-right: 5.5rem;
 }
 
 .ProseMirror .edgeever-mermaid-code-block {

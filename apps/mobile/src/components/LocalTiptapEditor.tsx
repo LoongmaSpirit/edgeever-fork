@@ -8,6 +8,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import * as Clipboard from "expo-clipboard";
 import type { TiptapDoc } from "@edgeever/shared";
 import {
   DEFAULT_IMAGE_WIDTH_PERCENT,
@@ -837,6 +838,8 @@ const createMobileCodeBlockExtension = (
       const svgContainer = document.createElement("div");
       const pre = document.createElement("pre");
       const code = document.createElement("code");
+      const copyButton = document.createElement("button");
+      let copyResetTimer: number | null = null;
       preview.contentEditable = "false";
       preview.className = "edgeever-mermaid-preview";
       preview.tabIndex = 0;
@@ -852,8 +855,40 @@ const createMobileCodeBlockExtension = (
       svgContainer.className = "edgeever-mermaid-svg";
       svgContainer.setAttribute("role", "img");
       svgContainer.setAttribute("aria-label", locale === "en-US" ? "Mermaid diagram preview" : "Mermaid 图表预览");
+      copyButton.type = "button";
+      copyButton.className = "edgeever-code-copy-button";
+      copyButton.contentEditable = "false";
+      copyButton.setAttribute("aria-label", locale === "en-US" ? "Copy code" : "复制代码");
+      copyButton.textContent = locale === "en-US" ? "Copy code" : "复制代码";
+      copyButton.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      copyButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void Clipboard.setStringAsync(currentNode.textContent).then(() => {
+          copyButton.textContent = locale === "en-US" ? "Copied" : "已复制";
+          copyButton.setAttribute("aria-label", locale === "en-US" ? "Copied" : "已复制");
+          if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
+          copyResetTimer = window.setTimeout(() => {
+            copyButton.textContent = locale === "en-US" ? "Copy code" : "复制代码";
+            copyButton.setAttribute("aria-label", locale === "en-US" ? "Copy code" : "复制代码");
+            copyResetTimer = null;
+          }, 1800);
+        }).catch(() => {
+          copyButton.textContent = locale === "en-US" ? "Copy failed" : "复制失败";
+          copyButton.setAttribute("aria-label", locale === "en-US" ? "Copy failed" : "复制失败");
+          if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
+          copyResetTimer = window.setTimeout(() => {
+            copyButton.textContent = locale === "en-US" ? "Copy code" : "复制代码";
+            copyButton.setAttribute("aria-label", locale === "en-US" ? "Copy code" : "复制代码");
+            copyResetTimer = null;
+          }, 1800);
+        });
+      });
       pre.append(code);
-      wrapper.append(preview, pre);
+      wrapper.append(copyButton, preview, pre);
 
       let currentNode = node;
       let renderTimer: number | null = null;
@@ -949,7 +984,10 @@ const createMobileCodeBlockExtension = (
           renderNode();
           return true;
         },
-        destroy: clearRender,
+        destroy: () => {
+          clearRender();
+          if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
+        },
       };
     };
   },
@@ -1353,10 +1391,12 @@ const getEditorStyles = (theme: "light" | "dark") => `
   .edgeever-editor-content p.is-editor-empty:first-child::before { float: left; height: 0; color: #94a3b8; content: attr(data-placeholder); pointer-events: none; }
   .edgeever-editor-content h1, .edgeever-editor-content h2, .edgeever-editor-content h3 { line-height: 1.3; }
   .edgeever-editor-content blockquote { margin-left: 0; padding-left: 14px; border-left: 3px solid #5eead4; color: ${theme === "dark" ? "#cbd5e1" : "#475569"}; }
-  .edgeever-editor-content pre { overflow-x: auto; border-radius: 10px; padding: 14px; background: #0f172a; color: #e2e8f0; }
+  .edgeever-editor-content pre { overflow-x: auto; border-radius: 10px; padding: 14px 90px 14px 14px; background: #0f172a; color: #e2e8f0; }
   .edgeever-editor-content code { border-radius: 4px; padding: 2px 4px; background: ${theme === "dark" ? "#1e293b" : "#f1f5f9"}; }
   .edgeever-editor-content pre code { padding: 0; background: transparent; }
-  .edgeever-mermaid-code-block { margin: 18px 0; overflow: visible; background: transparent; }
+  .edgeever-code-block, .edgeever-mermaid-code-block { position: relative; margin: 18px 0; overflow: visible; background: transparent; }
+  .edgeever-code-copy-button { position: absolute; top: 8px; right: 8px; z-index: 1; border: 1px solid ${theme === "dark" ? "#475569" : "#cbded1"}; border-radius: 6px; padding: 5px 8px; background: ${theme === "dark" ? "rgba(30, 41, 59, 0.94)" : "rgba(247, 251, 248, 0.94)"}; color: ${theme === "dark" ? "#cbd5e1" : "#475569"}; font: inherit; font-size: 12px; line-height: 1.35; }
+  .edgeever-code-copy-button:active { border-color: #0f766e; color: ${theme === "dark" ? "#86efac" : "#0f766e"}; }
   .edgeever-mermaid-code-block > pre { display: none; margin: 8px 0 0; }
   .edgeever-mermaid-code-block.is-source-visible > pre { display: block; }
   .edgeever-mermaid-preview { display: flex; min-height: 104px; align-items: center; justify-content: center; overflow-x: auto; padding: 16px 4px; background: transparent; }
